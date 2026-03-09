@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BW Contract Generator</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Staff Onboarding - Contract Generator</h1>
+      <p class="subtitle">Staff Onboarding (Outsource) Pipeline</p>
+    </header>
+
+    <div class="controls">
+      <span id="ticketCount" class="count"></span>
+      <button id="refreshBtn" class="btn btn-secondary" onclick="loadTickets()">Refresh</button>
+    </div>
+
+    <div id="loading" class="loading">Loading tickets...</div>
+    <div id="error" class="error" style="display:none"></div>
+
+    <table id="ticketsTable" style="display:none">
+      <thead>
+        <tr>
+          <th>Ticket</th>
+          <th>Client</th>
+          <th>Role</th>
+          <th>Onboarding Date</th>
+          <th>Stage</th>
+          <th>Created</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="ticketsBody"></tbody>
+    </table>
+
+    <div id="pagination" class="pagination" style="display:none">
+      <button id="loadMoreBtn" class="btn btn-secondary" onclick="loadMore()">Load More</button>
+    </div>
+  </div>
+
+  <div id="modal" class="modal" style="display:none">
+    <div class="modal-content">
+      <div id="modalSpinner" class="spinner"></div>
+      <p id="modalText">Generating contract...</p>
+      <a id="modalLink" href="#" target="_blank" style="display:none" class="btn btn-primary">Open Document</a>
+      <button id="modalClose" class="btn btn-secondary" style="display:none" onclick="closeModal()">Close</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

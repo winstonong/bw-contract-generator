@@ -1,0 +1,14 @@
+{
+  "name": "bw-contract-generator",
+  "version": "1.0.0",
+  "description": "Generate contractor agreements from HubSpot onboarding tickets",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "googleapis": "^129.0.0"
+  }
+}
