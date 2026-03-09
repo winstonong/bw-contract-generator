@@ -1,12 +1,17 @@
 const express = require('express');
+const cookieParser = require('cookie-parser');
+const crypto = require('crypto');
 const { google } = require('googleapis');
 const path = require('path');
 
 const app = express();
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 const PORT = process.env.PORT || 3000;
+const APP_PASSWORD = process.env.APP_PASSWORD || '1234';
+const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString('hex');
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
 const TEMPLATE_DOC_ID = process.env.GOOGLE_TEMPLATE_DOC_ID || '14DuY9yEFYT7ea-Oz-wW4zyK9zP25Am6YkwDVXJ6VRZM';
@@ -49,6 +54,92 @@ const FIELD_MAP = {
 
 // Pipeline stage labels (fetched dynamically, cached)
 let stageLabels = {};
+
+// --- Auth ---
+function generateToken(password) {
+  return crypto.createHmac('sha256', COOKIE_SECRET).update(password).digest('hex');
+}
+
+function requireAuth(req, res, next) {
+  const token = req.cookies?.auth_token;
+  if (token && token === generateToken(APP_PASSWORD)) {
+    return next();
+  }
+  res.redirect('/login');
+}
+
+// X-Robots-Tag header on all responses
+app.use((req, res, next) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  next();
+});
+
+// Robots.txt - block all crawlers
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain');
+  res.send('User-agent: *\nDisallow: /\n');
+});
+
+// Login page
+app.get('/login', (req, res) => {
+  const error = req.query.error ? '<p class="login-error">Incorrect password</p>' : '';
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Login - BW Contract Generator</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-box { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); width: 360px; text-align: center; }
+    .login-box h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .login-box p.sub { color: #666; font-size: 14px; margin-bottom: 24px; }
+    .login-box input { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 16px; }
+    .login-box input:focus { outline: none; border-color: #00a4bd; }
+    .login-box button { width: 100%; padding: 10px; background: #00a4bd; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }
+    .login-box button:hover { background: #008da4; }
+    .login-error { color: #d32f2f; font-size: 13px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <form class="login-box" method="POST" action="/login">
+    <h1>BW Contract Generator</h1>
+    <p class="sub">Enter password to continue</p>
+    ${error}
+    <input type="password" name="password" placeholder="Password" autofocus required>
+    <button type="submit">Sign In</button>
+  </form>
+</body>
+</html>`);
+});
+
+app.post('/login', (req, res) => {
+  const { password } = req.body;
+  if (password === APP_PASSWORD) {
+    const token = generateToken(APP_PASSWORD);
+    res.cookie('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    return res.redirect('/');
+  }
+  res.redirect('/login?error=1');
+});
+
+app.get('/logout', (req, res) => {
+  res.clearCookie('auth_token');
+  res.redirect('/login');
+});
+
+// Protect all routes below
+app.use(requireAuth);
+
+// Serve static files (only after auth)
+app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Google Auth ---
 function getGoogleAuth() {
