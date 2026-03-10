@@ -16,8 +16,11 @@ const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
 const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbxd5J0EJ-FOv1y6D_o7lKcXbacQvcCBRabaicJr9iOCbEYTdzdadWp1fbqYxVx_jqsVaw/exec';
 const APPS_SCRIPT_SECRET = process.env.APPS_SCRIPT_SECRET || 'bw-gen-2026';
 
-// Staff Onboarding (Outsource) pipeline
-const PIPELINE_ID = '4483329';
+// Pipelines to include
+const PIPELINE_IDS = [
+  '4483329',   // Staff Onboarding (Outsource)
+  '16984077',  // Staff Onboarding and Offboarding (BW Internal)
+];
 
 // Ticket properties to fetch from HubSpot
 const TICKET_PROPERTIES = [
@@ -162,11 +165,13 @@ async function hubspotFetch(url, options = {}) {
 async function fetchPipelineStages() {
   if (Object.keys(stageLabels).length > 0) return stageLabels;
   try {
-    const data = await hubspotFetch(
-      `https://api.hubapi.com/crm/v3/pipelines/tickets/${PIPELINE_ID}/stages`
-    );
-    for (const stage of data.results) {
-      stageLabels[stage.id] = stage.label;
+    for (const pid of PIPELINE_IDS) {
+      const data = await hubspotFetch(
+        `https://api.hubapi.com/crm/v3/pipelines/tickets/${pid}/stages`
+      );
+      for (const stage of data.results) {
+        stageLabels[stage.id] = stage.label;
+      }
     }
   } catch (err) {
     console.error('Failed to fetch pipeline stages:', err.message);
@@ -189,8 +194,8 @@ app.get('/api/tickets', async (req, res) => {
       filterGroups: [{
         filters: [{
           propertyName: 'hs_pipeline',
-          operator: 'EQ',
-          value: PIPELINE_ID,
+          operator: 'IN',
+          values: PIPELINE_IDS,
         }],
       }],
       properties: ['subject', 'createdate', 'hs_pipeline_stage', 'role', 'client', 'onboarding_date'],
