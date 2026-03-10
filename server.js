@@ -49,6 +49,8 @@ const FIELD_MAP = {
   'Client': 'client',
   'Number of Contracted Hours': 'number_of_paid_hours',
   'Job Description': 'job_description',
+  'Hourly Rate': 'hourly_rate',
+  'Staff Hourly/Monthly Rate Currency': 'currency',
 };
 
 // Pipeline stage labels (fetched dynamically, cached)
