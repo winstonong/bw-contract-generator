@@ -17,6 +17,20 @@ header {
   margin-bottom: 24px;
 }
 
+.header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-folder {
+  background: #4285f4;
+  color: #fff;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.btn-folder:hover { background: #3367d6; color: #fff; }
+
 h1 {
   font-size: 24px;
   font-weight: 600;
