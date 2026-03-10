@@ -1,7 +1,6 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
-const { google } = require('googleapis');
 const path = require('path');
 
 const app = express();
@@ -14,8 +13,8 @@ const APP_PASSWORD = process.env.APP_PASSWORD || '1234';
 const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString('hex');
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
-const TEMPLATE_DOC_ID = process.env.GOOGLE_TEMPLATE_DOC_ID || '14DuY9yEFYT7ea-Oz-wW4zyK9zP25Am6YkwDVXJ6VRZM';
-const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID || '';
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbxd5J0EJ-FOv1y6D_o7lKcXbacQvcCBRabaicJr9iOCbEYTdzdadWp1fbqYxVx_jqsVaw/exec';
+const APPS_SCRIPT_SECRET = process.env.APPS_SCRIPT_SECRET || 'bw-gen-2026';
 
 // Staff Onboarding (Outsource) pipeline
 const PIPELINE_ID = '4483329';
@@ -141,20 +140,6 @@ app.use(requireAuth);
 // Serve static files (only after auth)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Google Auth ---
-function getGoogleAuth() {
-  const keyJson = JSON.parse(
-    Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_KEY, 'base64').toString('utf-8')
-  );
-  return new google.auth.GoogleAuth({
-    credentials: keyJson,
-    scopes: [
-      'https://www.googleapis.com/auth/documents',
-      'https://www.googleapis.com/auth/drive',
-    ],
-  });
-}
-
 // --- HubSpot API helpers ---
 async function hubspotFetch(url, options = {}) {
   const resp = await fetch(url, {
@@ -249,11 +234,7 @@ app.post('/api/generate-contract', async (req, res) => {
     const ticket = await hubspotFetch(url);
     const props = ticket.properties;
 
-    // 2. Copy the Google Doc template
-    const auth = getGoogleAuth();
-    const drive = google.drive({ version: 'v3', auth });
-    const docs = google.docs({ version: 'v1', auth });
-
+    // 2. Build staff name and title
     const staffName = [
       props.synced__submitted_legal_first_name,
       props.synced__submitted_legal_last_name,
@@ -261,63 +242,49 @@ app.post('/api/generate-contract', async (req, res) => {
 
     const copyTitle = `Independent Contractor Agreement - ${staffName}`;
 
-    const copyParams = { name: copyTitle };
-    if (DRIVE_FOLDER_ID) copyParams.parents = [DRIVE_FOLDER_ID];
-
-    const copy = await drive.files.copy({
-      fileId: TEMPLATE_DOC_ID,
-      requestBody: copyParams,
-    });
-    const newDocId = copy.data.id;
-
-    // 3. Build replacements
-    const requests = [];
+    // 3. Build replacements map
+    const replacements = {};
     for (const [placeholder, propName] of Object.entries(FIELD_MAP)) {
       let value = props[propName] || '';
 
-      // Fallback: if country is empty, try assignment_country
       if (placeholder === 'Synced - Staff Address 5 Country' && !value) {
         value = props.assignment_country || '';
       }
-
-      // Format dates nicely
-      if (placeholder === 'Date Contract Sent' && value) {
+      if ((placeholder === 'Date Contract Sent' || placeholder === 'Onboarding Date') && value) {
         value = formatDate(value);
       }
-      if (placeholder === 'Onboarding Date' && value) {
-        value = formatDate(value);
-      }
-
-      // Strip HTML from job description
       if (placeholder === 'Job Description' && value) {
         value = stripHtml(value);
       }
 
-      requests.push({
-        replaceAllText: {
-          containsText: { text: `[${placeholder}]`, matchCase: false },
-          replaceText: value,
-        },
-      });
+      replacements[placeholder] = value;
     }
 
-    // 4. Execute replacements
-    if (requests.length > 0) {
-      await docs.documents.batchUpdate({
-        documentId: newDocId,
-        requestBody: { requests },
-      });
-    }
-
-    // 5. Make the doc accessible to anyone with the link
-    await drive.permissions.create({
-      fileId: newDocId,
-      requestBody: { role: 'writer', type: 'anyone' },
+    // 4. Call Apps Script web app to copy template and apply replacements
+    const scriptResp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: APPS_SCRIPT_SECRET,
+        title: copyTitle,
+        replacements,
+      }),
+      redirect: 'follow',
     });
 
-    const docUrl = `https://docs.google.com/document/d/${newDocId}/edit`;
+    const scriptText = await scriptResp.text();
+    let scriptData;
+    try {
+      scriptData = JSON.parse(scriptText);
+    } catch {
+      throw new Error(`Apps Script returned invalid JSON: ${scriptText.substring(0, 200)}`);
+    }
 
-    res.json({ docUrl, docId: newDocId, title: copyTitle });
+    if (scriptData.error) {
+      throw new Error(`Apps Script error: ${scriptData.error}`);
+    }
+
+    res.json({ docUrl: scriptData.docUrl, docId: scriptData.docId, title: scriptData.title });
   } catch (err) {
     console.error('Error generating contract:', err);
     res.status(500).json({ error: err.message });
