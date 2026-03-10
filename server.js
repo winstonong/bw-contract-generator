@@ -179,6 +179,7 @@ app.get('/api/tickets', async (req, res) => {
   try {
     const after = req.query.after || undefined;
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const query = req.query.q || '';
 
     await fetchPipelineStages();
 
@@ -194,6 +195,7 @@ app.get('/api/tickets', async (req, res) => {
       sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
       limit,
     };
+    if (query) body.query = query;
     if (after) body.after = after;
 
     const data = await hubspotFetch(

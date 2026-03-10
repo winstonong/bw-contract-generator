@@ -1,4 +1,6 @@
 let nextAfter = null;
+let searchTimeout = null;
+let currentQuery = '';
 
 async function loadTickets(append = false) {
   const loading = document.getElementById('loading');
@@ -19,6 +21,7 @@ async function loadTickets(append = false) {
   try {
     let url = '/api/tickets?limit=20';
     if (append && nextAfter) url += `&after=${nextAfter}`;
+    if (currentQuery) url += `&q=${encodeURIComponent(currentQuery)}`;
 
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(await resp.text());
@@ -53,6 +56,20 @@ async function loadTickets(append = false) {
 
 function loadMore() {
   loadTickets(true);
+}
+
+function onSearch() {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    currentQuery = document.getElementById('searchInput').value.trim();
+    loadTickets();
+  }, 300);
+}
+
+function clearSearch() {
+  document.getElementById('searchInput').value = '';
+  currentQuery = '';
+  loadTickets();
 }
 
 async function generateContract(ticketId, btn) {

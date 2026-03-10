@@ -14,9 +14,13 @@
       <p class="subtitle">Staff Onboarding (Outsource) Pipeline</p>
     </header>
 
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="Search by ticket name..." oninput="onSearch()">
+    </div>
+
     <div class="controls">
       <span id="ticketCount" class="count"></span>
-      <button id="refreshBtn" class="btn btn-secondary" onclick="loadTickets()">Refresh</button>
+      <button id="refreshBtn" class="btn btn-secondary" onclick="clearSearch()">Refresh</button>
     </div>
 
     <div id="loading" class="loading">Loading tickets...</div>

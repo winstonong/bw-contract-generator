@@ -29,6 +29,25 @@ h1 {
   margin-top: 4px;
 }
 
+.search-bar {
+  margin-bottom: 16px;
+}
+
+.search-bar input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.search-bar input:focus {
+  outline: none;
+  border-color: #00a4bd;
+  box-shadow: 0 0 0 2px rgba(0,164,189,0.15);
+}
+
 .controls {
   display: flex;
   justify-content: space-between;
