@@ -29,7 +29,7 @@ const TICKET_PROPERTIES = [
   'assignment_country',
   'onboarding_date', 'role', 'client',
   'number_of_paid_hours', 'job_description',
-  'contract_sending_date', 'hourly_rate', 'currency',
+  'contract_sending_date', 'hourly_rate', 'staff_hourly_monthly_rate_currency',
   'daily_work_schedule', 'weekly_work_schedule'
 ];
 
@@ -50,7 +50,7 @@ const FIELD_MAP = {
   'Number of Contracted Hours': 'number_of_paid_hours',
   'Job Description': 'job_description',
   'Hourly Rate': 'hourly_rate',
-  'Staff Hourly/Monthly Rate Currency': 'currency',
+  'Staff Hourly/Monthly Rate Currency': 'staff_hourly_monthly_rate_currency',
 };
 
 // Pipeline stage labels (fetched dynamically, cached)
