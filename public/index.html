@@ -35,7 +35,8 @@
           <th>Onboarding Date</th>
           <th>Stage</th>
           <th>Created</th>
-          <th>Action</th>
+          <th>Contract Type</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="ticketsBody"></tbody>
@@ -43,6 +44,18 @@
 
     <div id="pagination" class="pagination" style="display:none">
       <button id="loadMoreBtn" class="btn btn-secondary" onclick="loadMore()">Load More</button>
+    </div>
+
+    <!-- Admin: Template Configuration -->
+    <div class="admin-section">
+      <div class="admin-header" onclick="toggleAdmin()">
+        <h2>Template Configuration</h2>
+        <span id="adminToggle" class="admin-toggle">&#9654;</span>
+      </div>
+      <div id="adminBody" class="admin-body" style="display:none">
+        <p class="admin-hint">Paste the Google Doc URL for each contract template. Changes are saved automatically.</p>
+        <div class="template-grid" id="templateGrid"></div>
+      </div>
     </div>
   </div>
 

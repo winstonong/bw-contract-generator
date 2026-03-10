@@ -13,7 +13,7 @@ const APP_PASSWORD = process.env.APP_PASSWORD || '1234';
 const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString('hex');
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbxd5J0EJ-FOv1y6D_o7lKcXbacQvcCBRabaicJr9iOCbEYTdzdadWp1fbqYxVx_jqsVaw/exec';
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbxMa2MRzoUyU2JMa435y-ye3TAFhmF0IOh0LCtRvHX7k1YH3R5P50CwpghFYBYAtXnMYg/exec';
 const APPS_SCRIPT_SECRET = process.env.APPS_SCRIPT_SECRET || 'bw-gen-2026';
 
 // Pipelines to include
@@ -58,6 +58,9 @@ const FIELD_MAP = {
 
 // Pipeline stage labels (fetched dynamically, cached)
 let stageLabels = {};
+
+// In-memory store: last generated contract per ticket { ticketId: { docUrl, docId, title, generatedAt } }
+const lastContracts = {};
 
 // --- Auth ---
 function generateToken(password) {
@@ -235,8 +238,9 @@ app.get('/api/tickets', async (req, res) => {
 // POST /api/generate-contract - generate a Google Doc from a ticket
 app.post('/api/generate-contract', async (req, res) => {
   try {
-    const { ticketId } = req.body;
+    const { ticketId, templateDocId } = req.body;
     if (!ticketId) return res.status(400).json({ error: 'ticketId is required' });
+    if (!templateDocId) return res.status(400).json({ error: 'templateDocId is required' });
 
     // 1. Fetch full ticket details from HubSpot
     const url = `https://api.hubapi.com/crm/v3/objects/tickets/${ticketId}?properties=${TICKET_PROPERTIES.join(',')}`;
@@ -276,6 +280,7 @@ app.post('/api/generate-contract', async (req, res) => {
       body: JSON.stringify({
         secret: APPS_SCRIPT_SECRET,
         title: copyTitle,
+        templateId: templateDocId,
         replacements,
       }),
       redirect: 'follow',
@@ -293,11 +298,28 @@ app.post('/api/generate-contract', async (req, res) => {
       throw new Error(`Apps Script error: ${scriptData.error}`);
     }
 
-    res.json({ docUrl: scriptData.docUrl, docId: scriptData.docId, title: scriptData.title });
+    const result = { docUrl: scriptData.docUrl, docId: scriptData.docId, title: scriptData.title };
+
+    // Store as last generated contract for this ticket
+    lastContracts[ticketId] = { ...result, generatedAt: new Date().toISOString() };
+
+    res.json(result);
   } catch (err) {
     console.error('Error generating contract:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// GET /api/last-contracts - get last generated contracts for given ticket IDs
+app.get('/api/last-contracts', (req, res) => {
+  const ids = (req.query.ids || '').split(',').filter(Boolean);
+  const result = {};
+  for (const id of ids) {
+    if (lastContracts[id]) {
+      result[id] = lastContracts[id];
+    }
+  }
+  res.json(result);
 });
 
 // --- Helpers ---
