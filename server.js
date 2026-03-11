@@ -71,8 +71,28 @@ const lastContracts = {};
 const lastResumes = {};
 
 // --- Auth ---
-undefined
-  res.redirect('/login');
+function generateToken(password) {
+  return crypto.createHmac("sha256", COOKIE_SECRET).update(password).digest("hex");
+}
+
+function isContractsAuth(req) {
+  const token = req.cookies?.auth_contracts;
+  return token && token === generateToken(CONTRACTS_PASSWORD);
+}
+
+function isResumesAuth(req) {
+  const token = req.cookies?.auth_resumes;
+  return token && token === generateToken(RESUMES_PASSWORD);
+}
+
+function requireContractsAuth(req, res, next) {
+  if (isContractsAuth(req)) return next();
+  res.redirect("/login?page=contracts");
+}
+
+function requireResumesAuth(req, res, next) {
+  if (isResumesAuth(req)) return next();
+  res.redirect("/login?page=resumes");
 }
 
 // X-Robots-Tag header on all responses
