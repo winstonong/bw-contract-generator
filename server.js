@@ -91,6 +91,7 @@ function requireContractsAuth(req, res, next) {
 }
 
 function requireResumesAuth(req, res, next) {
+  console.log("requireResumesAuth cookies:", Object.keys(req.cookies || {}));
   if (isResumesAuth(req)) return next();
   res.redirect("/login?page=resumes");
 }
@@ -151,6 +152,7 @@ app.post('/login', (req, res) => {
 
 app.get('/logout', (req, res) => {
   res.clearCookie('auth_contracts');
+  res.clearCookie('auth_token');
   res.clearCookie('auth_resumes');
   res.redirect('/login');
 });
