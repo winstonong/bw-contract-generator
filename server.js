@@ -13,8 +13,12 @@ const APP_PASSWORD = process.env.APP_PASSWORD || '1234';
 const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString('hex');
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbxMa2MRzoUyU2JMa435y-ye3TAFhmF0IOh0LCtRvHX7k1YH3R5P50CwpghFYBYAtXnMYg/exec';
+const HUBSPOT_APPS_TOKEN = process.env.HUBSPOT_APPS_TOKEN;
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbxJxY9XRUfqgZ_tFmcbHnjh6pxV_vBJ4FSI5wo1oGGv6bTP-PTRezwVB9mSYtaKFt-6/exec';
 const APPS_SCRIPT_SECRET = process.env.APPS_SCRIPT_SECRET || 'bw-gen-2026';
+
+// Applications custom object type ID
+const APPLICATIONS_OBJECT_TYPE = '2-38227027';
 
 // Pipelines to include
 const PIPELINE_IDS = [
@@ -61,6 +65,9 @@ let stageLabels = {};
 
 // In-memory store: last generated contract per ticket { ticketId: { docUrl, docId, title, generatedAt } }
 const lastContracts = {};
+
+// In-memory store: last generated resume per application { appId: { docUrl, docId, title, generatedAt } }
+const lastResumes = {};
 
 // --- Auth ---
 function generateToken(password) {
@@ -163,6 +170,28 @@ async function hubspotFetch(url, options = {}) {
     throw new Error(`HubSpot API error ${resp.status}: ${text}`);
   }
   return resp.json();
+}
+
+async function hubspotAppsFetch(url, options = {}) {
+  const resp = await fetch(url, {
+    ...options,
+    headers: {
+      'Authorization': `Bearer ${HUBSPOT_APPS_TOKEN}`,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(`HubSpot API error ${resp.status}: ${text}`);
+  }
+  return resp.json();
+}
+
+function stripCodeFences(html) {
+  if (!html) return html;
+  // Remove markdown code fences: ```html ... ``` or ``` ... ```
+  return html.replace(/^```(?:html)?\s*\n?/i, '').replace(/\n?```\s*$/, '').trim();
 }
 
 async function fetchPipelineStages() {
@@ -317,6 +346,135 @@ app.get('/api/last-contracts', (req, res) => {
   for (const id of ids) {
     if (lastContracts[id]) {
       result[id] = lastContracts[id];
+    }
+  }
+  res.json(result);
+});
+
+// --- Applications / Resumes API Routes ---
+
+// GET /api/applications - list applications with generate_formatted_resume = Generate
+app.get('/api/applications', async (req, res) => {
+  try {
+    const after = req.query.after || undefined;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const query = req.query.q || '';
+
+    const body = {
+      filterGroups: [{
+        filters: [
+          {
+            propertyName: 'generate_formatted_resume',
+            operator: 'EQ',
+            value: 'Generate',
+          },
+          {
+            propertyName: 'ai_formatted_resume_code',
+            operator: 'HAS_PROPERTY',
+          },
+        ],
+      }],
+      properties: [
+        'candidate_name', 'client_name', 'role', 'createdate',
+        'generate_formatted_resume',
+      ],
+      sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+      limit,
+    };
+    if (query) body.query = query;
+    if (after) body.after = after;
+
+    const data = await hubspotAppsFetch(
+      `https://api.hubapi.com/crm/v3/objects/${APPLICATIONS_OBJECT_TYPE}/search`,
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+
+    const applications = data.results.map(a => ({
+      id: a.id,
+      candidateName: a.properties.candidate_name || '-',
+      clientName: a.properties.client_name || '-',
+      role: a.properties.role || '-',
+      createdate: a.properties.createdate,
+      hubspotUrl: `https://app.hubspot.com/contacts/8513837/record/${APPLICATIONS_OBJECT_TYPE}/${a.id}`,
+    }));
+
+    res.json({
+      applications,
+      total: data.total,
+      paging: data.paging,
+    });
+  } catch (err) {
+    console.error('Error fetching applications:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/generate-resume - generate a formatted Google Doc from application HTML
+app.post('/api/generate-resume', async (req, res) => {
+  try {
+    const { appId } = req.body;
+    if (!appId) return res.status(400).json({ error: 'appId is required' });
+
+    // 1. Fetch application with HTML content
+    const url = `https://api.hubapi.com/crm/v3/objects/${APPLICATIONS_OBJECT_TYPE}/${appId}?properties=candidate_name,client_name,role,ai_formatted_resume_code`;
+    const app = await hubspotAppsFetch(url);
+    const props = app.properties;
+
+    let htmlContent = props.ai_formatted_resume_code;
+    if (!htmlContent) {
+      return res.status(400).json({ error: 'No AI Formatted Resume Code found for this application' });
+    }
+
+    // Strip markdown code fences if present
+    htmlContent = stripCodeFences(htmlContent);
+
+    const candidateName = props.candidate_name || 'Unknown';
+    const title = `Formatted Resume - ${candidateName}`;
+
+    // 2. Call Apps Script to convert HTML to Google Doc
+    const scriptResp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret: APPS_SCRIPT_SECRET,
+        action: 'htmlToDoc',
+        title,
+        htmlContent,
+      }),
+      redirect: 'follow',
+    });
+
+    const scriptText = await scriptResp.text();
+    let scriptData;
+    try {
+      scriptData = JSON.parse(scriptText);
+    } catch {
+      throw new Error(`Apps Script returned invalid JSON: ${scriptText.substring(0, 200)}`);
+    }
+
+    if (scriptData.error) {
+      throw new Error(`Apps Script error: ${scriptData.error}`);
+    }
+
+    const result = { docUrl: scriptData.docUrl, docId: scriptData.docId, title: scriptData.title };
+
+    // Store as last generated resume for this application
+    lastResumes[appId] = { ...result, generatedAt: new Date().toISOString() };
+
+    res.json(result);
+  } catch (err) {
+    console.error('Error generating resume:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/last-resumes - get last generated resumes for given application IDs
+app.get('/api/last-resumes', (req, res) => {
+  const ids = (req.query.ids || '').split(',').filter(Boolean);
+  const result = {};
+  for (const id of ids) {
+    if (lastResumes[id]) {
+      result[id] = lastResumes[id];
     }
   }
   res.json(result);
