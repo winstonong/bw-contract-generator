@@ -2,18 +2,23 @@ const express = require("express")
 const session = require("express-session")
 const passport = require("passport")
 const GoogleStrategy = require("passport-google-oauth20").Strategy
+const cookieParser = require("cookie-parser")
 const crypto = require("crypto")
 const path = require("path")
 
 const app = express()
+app.set("trust proxy", 1)
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
+app.use(cookieParser())
 
 const PORT = process.env.PORT || 3000
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET
 const SESSION_SECRET =
   process.env.SESSION_SECRET || crypto.randomBytes(32).toString("hex")
+const COOKIE_SECRET =
+  process.env.COOKIE_SECRET || crypto.randomBytes(32).toString("hex")
 const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`
 // Comma-separated list of allowed Google emails. If empty, any authenticated Google user is allowed.
 const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || "")
@@ -135,12 +140,42 @@ function isAllowedEmail(email) {
   return ALLOWED_EMAILS.includes(email.toLowerCase())
 }
 
+// Signed cookie helpers — auth state lives in a cookie, not the session,
+// so it works reliably behind reverse proxies.
+function generateAuthToken(email) {
+  return crypto
+    .createHmac("sha256", COOKIE_SECRET)
+    .update(email.toLowerCase())
+    .digest("hex")
+}
+
+const COOKIE_OPTS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+}
+
+function getAuthEmail(req) {
+  try {
+    const raw = req.cookies?.auth_user
+    if (!raw) return null
+    const { email, token } = JSON.parse(raw)
+    if (!email || !token) return null
+    if (token !== generateAuthToken(email)) return null
+    return email.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
 function requireAuth(req, res, next) {
-  if (!req.user) {
+  const email = getAuthEmail(req)
+  if (!email) {
     req.session.returnTo = req.originalUrl
     return res.redirect("/login")
   }
-  if (!isAllowedEmail(req.user.email)) {
+  if (!isAllowedEmail(email)) {
     return res.redirect("/login?error=unauthorized")
   }
   return next()
@@ -164,7 +199,8 @@ app.get("/robots.txt", (req, res) => {
 
 // Login page
 app.get("/login", (req, res) => {
-  if (req.user && isAllowedEmail(req.user.email)) {
+  const email = getAuthEmail(req)
+  if (email && isAllowedEmail(email)) {
     return res.redirect(req.session.returnTo || "/")
   }
   const error =
@@ -225,21 +261,24 @@ app.get(
   "/auth/google/callback",
   passport.authenticate("google", { failureRedirect: "/login?error=1" }),
   (req, res) => {
-    if (!isAllowedEmail(req.user?.email)) {
+    const email = req.user?.email?.toLowerCase()
+    if (!email || !isAllowedEmail(email)) {
       req.logout(() => {})
       return res.redirect("/login?error=unauthorized")
     }
+    // Write a signed cookie so requireAuth works reliably across redirects
+    const token = generateAuthToken(email)
+    res.cookie("auth_user", JSON.stringify({ email, token }), COOKIE_OPTS)
     const returnTo = req.session.returnTo || "/"
     delete req.session.returnTo
-    req.session.save(() => {
-      res.redirect(returnTo)
-    })
+    res.redirect(returnTo)
   },
 )
 
 app.get("/logout", (req, res) => {
   req.logout(() => {
     req.session.destroy()
+    res.clearCookie("auth_user")
     res.redirect("/login")
   })
 })
