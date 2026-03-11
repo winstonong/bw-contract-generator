@@ -14,7 +14,7 @@ const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toStri
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
 const HUBSPOT_APPS_TOKEN = process.env.HUBSPOT_APPS_TOKEN;
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbwDp9pVrgo_96hr55jqhglZS2LfYGZxSaggU9NkRdGlwsvMqPesQxNcwWigRGiJEQ1lvg/exec';
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbyI7MOO8rNDduy5gGweUIP7kVXBDFEqF4KA8QdMGEH6Whkc5IKdamVplZLVtmYoOFNF/exec';
 const APPS_SCRIPT_SECRET = process.env.APPS_SCRIPT_SECRET || 'bw-gen-2026';
 
 // Applications custom object type ID
