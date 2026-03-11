@@ -1,17 +1,22 @@
 const express = require('express');
-const cookieParser = require('cookie-parser');
+const session = require('express-session');
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
 const PORT = process.env.PORT || 3000;
-const CONTRACTS_PASSWORD = process.env.CONTRACTS_PASSWORD || '789';
-const RESUMES_PASSWORD = process.env.RESUMES_PASSWORD || '1234';
-const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString('hex');
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+// Comma-separated list of allowed Google emails. If empty, any authenticated Google user is allowed.
+const ALLOWED_EMAILS = (process.env.ALLOWED_EMAILS || '')
+  .split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
 const HUBSPOT_APPS_TOKEN = process.env.HUBSPOT_APPS_TOKEN;
@@ -70,30 +75,55 @@ const lastContracts = {};
 // In-memory store: last generated resume per application { appId: { docUrl, docId, title, generatedAt } }
 const lastResumes = {};
 
+// --- Session & Passport ---
+app.use(session({
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+passport.use(new GoogleStrategy({
+  clientID: GOOGLE_CLIENT_ID,
+  clientSecret: GOOGLE_CLIENT_SECRET,
+  callbackURL: `${BASE_URL}/auth/google/callback`,
+}, (accessToken, refreshToken, profile, done) => {
+  const email = profile.emails?.[0]?.value?.toLowerCase();
+  if (!email) return done(null, false, { message: 'No email from Google' });
+  return done(null, { email, name: profile.displayName });
+}));
+
+passport.serializeUser((user, done) => done(null, user));
+passport.deserializeUser((user, done) => done(null, user));
+
 // --- Auth ---
-function generateToken(password) {
-  return crypto.createHmac("sha256", COOKIE_SECRET).update(password).digest("hex");
+function isAllowedEmail(email) {
+  if (!email) return false;
+  if (ALLOWED_EMAILS.length === 0) return true; // no restriction set — allow any Google user
+  return ALLOWED_EMAILS.includes(email.toLowerCase());
 }
 
-function isContractsAuth(req) {
-  const token = req.cookies?.auth_contracts;
-  return token && token === generateToken(CONTRACTS_PASSWORD);
+function requireAuth(req, res, next) {
+  if (!req.user) {
+    req.session.returnTo = req.originalUrl;
+    return res.redirect('/login');
+  }
+  if (!isAllowedEmail(req.user.email)) {
+    return res.redirect('/login?error=unauthorized');
+  }
+  return next();
 }
 
-function isResumesAuth(req) {
-  const token = req.cookies?.auth_resumes;
-  return token && token === generateToken(RESUMES_PASSWORD);
-}
-
-function requireContractsAuth(req, res, next) {
-  if (isContractsAuth(req)) return next();
-  res.redirect("/login?page=contracts");
-}
-
-function requireResumesAuth(req, res, next) {
-  if (isResumesAuth(req)) return next();
-  res.redirect("/login?page=resumes");
-}
+// Alias for contracts and resumes (both use the same Google auth)
+const requireContractsAuth = requireAuth;
+const requireResumesAuth = requireAuth;
 
 // X-Robots-Tag header on all responses
 app.use((req, res, next) => {
@@ -109,50 +139,77 @@ app.get('/robots.txt', (req, res) => {
 
 // Login page
 app.get('/login', (req, res) => {
-  const page = req.query.page || 'resumes';
-  const error = req.query.error ? '<p class="login-error">Incorrect password</p>' : '';
-  const title = page === 'contracts' ? 'Contract Generator' : 'Formatted Resumes';
-  let html = LOGIN_PAGE_HTML;
-  html = html.replace(/TITLE_PLACEHOLDER/g, title);
-  html = html.replace('ERROR_PLACEHOLDER', error);
-  html = html.replace('PAGE_PLACEHOLDER', page);
-  res.send(html);
+  if (req.user && isAllowedEmail(req.user.email)) {
+    return res.redirect(req.session.returnTo || '/');
+  }
+  const error = req.query.error === 'unauthorized'
+    ? '<p class="login-error">Your Google account is not authorized to access this app.</p>'
+    : req.query.error
+      ? '<p class="login-error">Sign-in failed. Please try again.</p>'
+      : '';
+  res.send(buildLoginPage(error));
 });
 
-const LOGIN_PAGE_HTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <meta name=\"robots\" content=\"noindex, nofollow\">\n  <title>Login - TITLE_PLACEHOLDER</title>\n  <style>\n    * { box-sizing: border-box; margin: 0; padding: 0; }\n    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; display: flex; align-items: center; justify-content: center; min-height: 100vh; }\n    .login-box { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); width: 360px; text-align: center; }\n    .login-box h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }\n    .login-box p.sub { color: #666; font-size: 14px; margin-bottom: 24px; }\n    .login-box input[type=password] { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 16px; }\n    .login-box input[type=password]:focus { outline: none; border-color: #00a4bd; }\n    .login-box button { width: 100%; padding: 10px; background: #00a4bd; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }\n    .login-box button:hover { background: #008da4; }\n    .login-error { color: #d32f2f; font-size: 13px; margin-bottom: 12px; }\n  </style>\n</head>\n<body>\n  <form class=\"login-box\" method=\"POST\" action=\"/login\">\n    <h1>TITLE_PLACEHOLDER</h1>\n    <p class=\"sub\">Enter password to continue</p>\n    ERROR_PLACEHOLDER\n    <input type=\"hidden\" name=\"page\" value=\"PAGE_PLACEHOLDER\">\n    <input type=\"password\" name=\"password\" placeholder=\"Password\" autofocus required>\n    <button type=\"submit\">Sign In</button>\n  </form>\n</body>\n</html>";
+function buildLoginPage(error) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Sign In - Bruntwork</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-box { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); width: 360px; text-align: center; }
+    .login-box h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+    .login-box p.sub { color: #666; font-size: 14px; margin-bottom: 28px; }
+    .google-btn { display: inline-flex; align-items: center; justify-content: center; gap: 12px; width: 100%; padding: 10px 20px; background: #fff; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; font-weight: 500; color: #333; text-decoration: none; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: background 0.15s, box-shadow 0.15s; }
+    .google-btn:hover { background: #f8f8f8; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+    .login-error { color: #d32f2f; font-size: 13px; margin-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="login-box">
+    <h1>Bruntwork</h1>
+    <p class="sub">Sign in to continue</p>
+    ${error}
+    <a href="/auth/google" class="google-btn">
+      <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-3.58-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      Sign in with Google
+    </a>
+  </div>
+</body>
+</html>`;
+}
 
-app.post('/login', (req, res) => {
-  const { password, page } = req.body;
+// Start Google OAuth
+app.get('/auth/google', passport.authenticate('google', { scope: ['email', 'profile'] }));
 
-  if (page === 'contracts' && password === CONTRACTS_PASSWORD) {
-    const token = generateToken(CONTRACTS_PASSWORD);
-    res.cookie('auth_contracts', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    return res.redirect('/');
+// Google OAuth callback
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/login?error=1' }),
+  (req, res) => {
+    if (!isAllowedEmail(req.user?.email)) {
+      req.logout(() => {});
+      return res.redirect('/login?error=unauthorized');
+    }
+    const returnTo = req.session.returnTo || '/';
+    delete req.session.returnTo;
+    res.redirect(returnTo);
   }
-
-  if (page === 'resumes' && password === RESUMES_PASSWORD) {
-    const token = generateToken(RESUMES_PASSWORD);
-    res.cookie('auth_resumes', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
-    return res.redirect('/resumes.html');
-  }
-
-  res.redirect('/login?page=' + (page || 'resumes') + '&error=1');
-});
+);
 
 app.get('/logout', (req, res) => {
-  res.clearCookie('auth_contracts');
-  res.clearCookie('auth_resumes');
-  res.redirect('/login');
+  req.logout(() => {
+    req.session.destroy();
+    res.redirect('/login');
+  });
 });
 
 // Serve static assets (CSS, JS) without auth
@@ -164,12 +221,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Contracts page - password "789"
+// Contracts page
 app.get('/', requireContractsAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Resumes page - password "1234"
+// Resumes page
 app.get('/resumes.html', requireResumesAuth, (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'resumes.html'));
 });
