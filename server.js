@@ -375,7 +375,7 @@ app.get('/api/applications', async (req, res) => {
         ],
       }],
       properties: [
-        'candidate_name', 'client_name', 'role', 'createdate',
+        'first_name', 'last_name', 'client__cloned_', 'role__cloned_', 'createdate',
         'generate_formatted_resume',
       ],
       sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
@@ -389,14 +389,19 @@ app.get('/api/applications', async (req, res) => {
       { method: 'POST', body: JSON.stringify(body) }
     );
 
-    const applications = data.results.map(a => ({
-      id: a.id,
-      candidateName: a.properties.candidate_name || '-',
-      clientName: a.properties.client_name || '-',
-      role: a.properties.role || '-',
-      createdate: a.properties.createdate,
-      hubspotUrl: `https://app.hubspot.com/contacts/8513837/record/${APPLICATIONS_OBJECT_TYPE}/${a.id}`,
-    }));
+    const applications = data.results.map(a => {
+      const firstName = a.properties.first_name || '';
+      const lastName = a.properties.last_name || '';
+      const candidateName = [firstName, lastName].filter(Boolean).join(' ') || '-';
+      return {
+        id: a.id,
+        candidateName,
+        clientName: a.properties['client__cloned_'] || '-',
+        role: a.properties['role__cloned_'] || '-',
+        createdate: a.properties.createdate,
+        hubspotUrl: `https://app.hubspot.com/contacts/8513837/record/${APPLICATIONS_OBJECT_TYPE}/${a.id}`,
+      };
+    });
 
     res.json({
       applications,
@@ -416,9 +421,9 @@ app.post('/api/generate-resume', async (req, res) => {
     if (!appId) return res.status(400).json({ error: 'appId is required' });
 
     // 1. Fetch application with HTML content
-    const url = `https://api.hubapi.com/crm/v3/objects/${APPLICATIONS_OBJECT_TYPE}/${appId}?properties=candidate_name,client_name,role,ai_formatted_resume_code`;
-    const app = await hubspotAppsFetch(url);
-    const props = app.properties;
+    const url = `https://api.hubapi.com/crm/v3/objects/${APPLICATIONS_OBJECT_TYPE}/${appId}?properties=first_name,last_name,client__cloned_,role__cloned_,ai_formatted_resume_code`;
+    const appData = await hubspotAppsFetch(url);
+    const props = appData.properties;
 
     let htmlContent = props.ai_formatted_resume_code;
     if (!htmlContent) {
@@ -428,7 +433,9 @@ app.post('/api/generate-resume', async (req, res) => {
     // Strip markdown code fences if present
     htmlContent = stripCodeFences(htmlContent);
 
-    const candidateName = props.candidate_name || 'Unknown';
+    const firstName = props.first_name || '';
+    const lastName = props.last_name || '';
+    const candidateName = [firstName, lastName].filter(Boolean).join(' ') || 'Unknown';
     const title = `Formatted Resume - ${candidateName}`;
 
     // 2. Call Apps Script to convert HTML to Google Doc
