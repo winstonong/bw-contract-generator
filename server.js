@@ -9,7 +9,8 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
 const PORT = process.env.PORT || 3000;
-const APP_PASSWORD = process.env.APP_PASSWORD || '1234';
+const CONTRACTS_PASSWORD = process.env.CONTRACTS_PASSWORD || '789';
+const RESUMES_PASSWORD = process.env.RESUMES_PASSWORD || '1234';
 const COOKIE_SECRET = process.env.COOKIE_SECRET || crypto.randomBytes(32).toString('hex');
 
 const HUBSPOT_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;
@@ -70,15 +71,7 @@ const lastContracts = {};
 const lastResumes = {};
 
 // --- Auth ---
-function generateToken(password) {
-  return crypto.createHmac('sha256', COOKIE_SECRET).update(password).digest('hex');
-}
-
-function requireAuth(req, res, next) {
-  const token = req.cookies?.auth_token;
-  if (token && token === generateToken(APP_PASSWORD)) {
-    return next();
-  }
+undefined
   res.redirect('/login');
 }
 
@@ -96,64 +89,70 @@ app.get('/robots.txt', (req, res) => {
 
 // Login page
 app.get('/login', (req, res) => {
+  const page = req.query.page || 'resumes';
   const error = req.query.error ? '<p class="login-error">Incorrect password</p>' : '';
-  res.send(`<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="robots" content="noindex, nofollow">
-  <title>Login - BW Contract Generator</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .login-box { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); width: 360px; text-align: center; }
-    .login-box h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-    .login-box p.sub { color: #666; font-size: 14px; margin-bottom: 24px; }
-    .login-box input { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 16px; }
-    .login-box input:focus { outline: none; border-color: #00a4bd; }
-    .login-box button { width: 100%; padding: 10px; background: #00a4bd; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }
-    .login-box button:hover { background: #008da4; }
-    .login-error { color: #d32f2f; font-size: 13px; margin-bottom: 12px; }
-  </style>
-</head>
-<body>
-  <form class="login-box" method="POST" action="/login">
-    <h1>BW Contract Generator</h1>
-    <p class="sub">Enter password to continue</p>
-    ${error}
-    <input type="password" name="password" placeholder="Password" autofocus required>
-    <button type="submit">Sign In</button>
-  </form>
-</body>
-</html>`);
+  const title = page === 'contracts' ? 'Contract Generator' : 'Formatted Resumes';
+  let html = LOGIN_PAGE_HTML;
+  html = html.replace(/TITLE_PLACEHOLDER/g, title);
+  html = html.replace('ERROR_PLACEHOLDER', error);
+  html = html.replace('PAGE_PLACEHOLDER', page);
+  res.send(html);
 });
 
+const LOGIN_PAGE_HTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <meta name=\"robots\" content=\"noindex, nofollow\">\n  <title>Login - TITLE_PLACEHOLDER</title>\n  <style>\n    * { box-sizing: border-box; margin: 0; padding: 0; }\n    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #f5f5f5; color: #333; display: flex; align-items: center; justify-content: center; min-height: 100vh; }\n    .login-box { background: #fff; border-radius: 12px; padding: 40px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); width: 360px; text-align: center; }\n    .login-box h1 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }\n    .login-box p.sub { color: #666; font-size: 14px; margin-bottom: 24px; }\n    .login-box input[type=password] { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 16px; }\n    .login-box input[type=password]:focus { outline: none; border-color: #00a4bd; }\n    .login-box button { width: 100%; padding: 10px; background: #00a4bd; color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; }\n    .login-box button:hover { background: #008da4; }\n    .login-error { color: #d32f2f; font-size: 13px; margin-bottom: 12px; }\n  </style>\n</head>\n<body>\n  <form class=\"login-box\" method=\"POST\" action=\"/login\">\n    <h1>TITLE_PLACEHOLDER</h1>\n    <p class=\"sub\">Enter password to continue</p>\n    ERROR_PLACEHOLDER\n    <input type=\"hidden\" name=\"page\" value=\"PAGE_PLACEHOLDER\">\n    <input type=\"password\" name=\"password\" placeholder=\"Password\" autofocus required>\n    <button type=\"submit\">Sign In</button>\n  </form>\n</body>\n</html>";
+
 app.post('/login', (req, res) => {
-  const { password } = req.body;
-  if (password === APP_PASSWORD) {
-    const token = generateToken(APP_PASSWORD);
-    res.cookie('auth_token', token, {
+  const { password, page } = req.body;
+
+  if (page === 'contracts' && password === CONTRACTS_PASSWORD) {
+    const token = generateToken(CONTRACTS_PASSWORD);
+    res.cookie('auth_contracts', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000,
     });
     return res.redirect('/');
   }
-  res.redirect('/login?error=1');
+
+  if (page === 'resumes' && password === RESUMES_PASSWORD) {
+    const token = generateToken(RESUMES_PASSWORD);
+    res.cookie('auth_resumes', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+    return res.redirect('/resumes.html');
+  }
+
+  res.redirect('/login?page=' + (page || 'resumes') + '&error=1');
 });
 
 app.get('/logout', (req, res) => {
-  res.clearCookie('auth_token');
+  res.clearCookie('auth_contracts');
+  res.clearCookie('auth_resumes');
   res.redirect('/login');
 });
 
-// Protect all routes below
-app.use(requireAuth);
+// Serve static assets (CSS, JS) without auth
+app.use((req, res, next) => {
+  const ext = path.extname(req.path);
+  if (ext && ext !== '.html') {
+    return express.static(path.join(__dirname, 'public'))(req, res, next);
+  }
+  next();
+});
 
-// Serve static files (only after auth)
-app.use(express.static(path.join(__dirname, 'public')));
+// Contracts page - password "789"
+app.get('/', requireContractsAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Resumes page - password "1234"
+app.get('/resumes.html', requireResumesAuth, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'resumes.html'));
+});
 
 // --- HubSpot API helpers ---
 async function hubspotFetch(url, options = {}) {
@@ -214,7 +213,7 @@ async function fetchPipelineStages() {
 // --- API Routes ---
 
 // GET /api/tickets - list tickets from Staff Onboarding pipeline
-app.get('/api/tickets', async (req, res) => {
+app.get('/api/tickets', requireContractsAuth, async (req, res) => {
   try {
     const after = req.query.after || undefined;
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
@@ -265,7 +264,7 @@ app.get('/api/tickets', async (req, res) => {
 });
 
 // POST /api/generate-contract - generate a Google Doc from a ticket
-app.post('/api/generate-contract', async (req, res) => {
+app.post('/api/generate-contract', requireContractsAuth, async (req, res) => {
   try {
     const { ticketId, templateDocId } = req.body;
     if (!ticketId) return res.status(400).json({ error: 'ticketId is required' });
@@ -340,7 +339,7 @@ app.post('/api/generate-contract', async (req, res) => {
 });
 
 // GET /api/last-contracts - get last generated contracts for given ticket IDs
-app.get('/api/last-contracts', (req, res) => {
+app.get('/api/last-contracts', requireContractsAuth, (req, res) => {
   const ids = (req.query.ids || '').split(',').filter(Boolean);
   const result = {};
   for (const id of ids) {
@@ -354,7 +353,7 @@ app.get('/api/last-contracts', (req, res) => {
 // --- Applications / Resumes API Routes ---
 
 // GET /api/applications - list applications with generate_formatted_resume = Generate
-app.get('/api/applications', async (req, res) => {
+app.get('/api/applications', requireResumesAuth, async (req, res) => {
   try {
     const after = req.query.after || undefined;
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
@@ -415,7 +414,7 @@ app.get('/api/applications', async (req, res) => {
 });
 
 // POST /api/generate-resume - generate a formatted Google Doc from application HTML
-app.post('/api/generate-resume', async (req, res) => {
+app.post('/api/generate-resume', requireResumesAuth, async (req, res) => {
   try {
     const { appId } = req.body;
     if (!appId) return res.status(400).json({ error: 'appId is required' });
@@ -476,7 +475,7 @@ app.post('/api/generate-resume', async (req, res) => {
 });
 
 // GET /api/last-resumes - get last generated resumes for given application IDs
-app.get('/api/last-resumes', (req, res) => {
+app.get('/api/last-resumes', requireResumesAuth, (req, res) => {
   const ids = (req.query.ids || '').split(',').filter(Boolean);
   const result = {};
   for (const id of ids) {
