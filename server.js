@@ -231,7 +231,9 @@ app.get(
     }
     const returnTo = req.session.returnTo || "/"
     delete req.session.returnTo
-    res.redirect(returnTo)
+    req.session.save(() => {
+      res.redirect(returnTo)
+    })
   },
 )
 
